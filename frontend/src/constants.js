@@ -128,6 +128,25 @@ const CANTO_CHAIN = {
   geckoChainString: "canto"
 };
 
+const ALTHEA_CHAIN = {
+  addrs: {
+    dex: "0xD50c0953a99325d01cca655E57070F1be4983b6b",
+    query: "0xB2F37Ba3CaDEc9aAf43BC716B1B86656be2d06Eb",
+    impact: "0x355dCc9FA29d6cA7D0E7e317E97bDbD6ee7e995F",
+    multicall3: "0x9726268F55d581d5F50c3853969010ACDCe7Cbff"
+  },
+  poolIndex: 36000,
+  chainId: 6633438,
+  gridSize: 16,
+  proxyPaths: {
+    cold: 3,
+    long: 4,
+    liq: 2
+  },
+  blockExplorer: "https://tuber.build/",
+  geckoChainString: "althea"
+};
+
 const BLAST_CHAIN = {
   nodeUrl: "https://rpc.ankr.com/blast",
   addrs: {
@@ -183,4 +202,5 @@ export const CROC_CHAINS = {
   534351: SCROLL_SEPOLIA_CHAIN,
   534352: SCROLL_CHAIN,
   168587773: BLAST_SEPOLIA_CHAIN,
+  6633438: ALTHEA_CHAIN,
 }
