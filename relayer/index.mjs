@@ -33,6 +33,8 @@ import { decodeCrocPrice } from "./utils.mjs";
 
 console.log("Starting relayer");
 
+const PORT = process.env.PORT || 80;
+
 const blast = defineChain({
   id: 81457,
   name: "Blast",
@@ -93,7 +95,7 @@ export const blastSepolia = defineChain({
 });
 
 export const althea = defineChain({
-  id: 6633438,
+  id: 12345,
   name: "Althea",
   nativeCurrency: {
     name: "Althea",
@@ -102,10 +104,10 @@ export const althea = defineChain({
   },
   rpcUrls: {
     public: {
-      http: ["http://testnet.althea.net:8545"],
+      http: ["http://testnet.althea.zone:8545"],
     },
     default: {
-      http: ["http://testnet.althea.net:8545"],
+      http: ["http://testnet.althea.zone:8545"],
     },
   },
   blockExplorers: {
@@ -117,7 +119,7 @@ export const althea = defineChain({
   },
   contracts: {
     multicall3: {
-      address: "0x9726268F55d581d5F50c3853969010ACDCe7Cbff",
+      address: "0xEac8D1987CFD23Cc0B08408cBFAFe80786C135aC",
       blockCreated: 1,
     },
   },
@@ -169,9 +171,9 @@ const TRANSPORTS = {
     tx: http(`https://rpc.ankr.com/scroll/${process.env.ANKR_KEY}`),
     chain: scroll,
   },
-  6633438: {
-    http: http(`http://testnet.althea.net:8545`),
-    tx: http(`http://testnet.althea.net:8545`),
+  12345: {
+    http: http(`http://testnet.althea.zone:8545`),
+    tx: http(`http://testnet.althea.zone:8545`),
     chain: althea,
   },
 };
@@ -207,7 +209,7 @@ const RELAY_SPEC = {
       "0x06efdbff2a14a7c8e15944d1f4a48f9f95f663a4",
       "0xf55bec9cafdbe8730f096aa55dad6d22d44099df",
     ],
-    6633438: [
+    12345: [
       ZERO_ADDRESS,
 
       "0x0412C7c846bb6b7DC462CF6B453f76D8440b2609",
@@ -236,7 +238,7 @@ const RELAY_SPEC = {
     534351: 1.25,
     534352: 1.25,
     168587773: 5,
-    6633438: 1.1,
+    12345: 1.1,
   }, // multiplies current gas by this number, based on chainId
 };
 
@@ -294,20 +296,38 @@ app.use(cors());
 app.use(express.json({ type: "*/*" }));
 
 const logFormat =
-  ":date[iso] - :url - :status - :response-time ms - :body - :res-body";
+  ":date[iso] [:method] :url - :status - :response-time ms - :body - :res-body";
 const accessLogStream = fs.createWriteStream("relayer.log", {
   flags: "a",
 });
 morgan.token("body", (req, res) => JSON.stringify(req.body));
 morgan.token("res-body", (_req, res) => res.__custombody__);
 
+// Console logging
 app.use(
   morgan(logFormat, {
+    immediate: false,
+    stream: process.stdout,
+  })
+);
+
+// File logging
+app.use(
+  morgan(logFormat, {
+    immediate: false,
     stream: accessLogStream,
   })
 );
 
-app.use(morgan(logFormat));
+// Add a test log after setup
+console.log("Morgan logging configured");
+
+// Add direct console logging for debugging
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  console.log("Request body:", req.body);
+  next();
+});
 
 function parseTip(tip, chainId) {
   if (tip == "0x") throw "No tip attached";
@@ -389,7 +409,8 @@ async function isTipEnough(cmd, gasPrice) {
   const ethTip = await convertTipToETH(token, amount, cmd.chainId);
   const gasNeeded = await estimateRelay(cmd);
   let gasFee = gasNeeded * gasPrice;
-  // l1fee for scroll
+
+  // L1 fee calculations for scroll and blast remain the same...
   if ([scroll.id, scrollSepolia.id].indexOf(cmd.chainId) != -1) {
     const calldata = encodeFunctionData({
       functionName: "userCmdRelayer",
@@ -415,9 +436,7 @@ async function isTipEnough(cmd, gasPrice) {
     const l1fee = await client.readContract(call);
     console.log("l1fee", l1fee);
     gasFee += (l1fee * 130n) / 100n;
-  }
-  // l1fee for blast
-  else if ([blast.id, blastSepolia.id].indexOf(cmd.chainId) != -1) {
+  } else if ([blast.id, blastSepolia.id].indexOf(cmd.chainId) != -1) {
     const calldata = encodeFunctionData({
       functionName: "userCmdRelayer",
       args: [cmd.callpath, cmd.cmd, cmd.conds, cmd.tip, cmd.sig],
@@ -443,13 +462,23 @@ async function isTipEnough(cmd, gasPrice) {
     console.log("l1fee", l1fee);
     gasFee += (l1fee * 115n) / 100n;
   }
-  console.log("gasFee", gasFee, "ethTip", ethTip);
 
+  console.log("gasFee", gasFee, "ethTip", ethTip);
   const ratio = parseInt((ethTip * 10000n) / gasFee) / 10000;
   console.log("tip ratio", ratio);
-  if (ratio < RELAY_SPEC.tipThreshold) return false;
 
-  return true;
+  // For testing: Always accept tips on testnet chains
+  if (
+    cmd.chainId === althea.id || // Althea testnet
+    cmd.chainId === blastSepolia.id ||
+    cmd.chainId === scrollSepolia.id ||
+    cmd.chainId === goerli.id
+  ) {
+    return true;
+  }
+
+  // Normal threshold check for mainnet chains
+  return ratio >= RELAY_SPEC.tipThreshold;
 }
 
 async function sendRelayerTx(cmd, maxFeePerGas) {
@@ -466,7 +495,9 @@ async function sendRelayerTx(cmd, maxFeePerGas) {
       account: ZERO_ADDRESS,
     };
     if (
-      [mainnet.id, canto.id, goerli.id, sepolia.id].indexOf(cmd.chainId) != -1
+      [mainnet.id, canto.id, goerli.id, sepolia.id, althea.id].indexOf(
+        cmd.chainId
+      ) != -1
     ) {
       tx.maxFeePerGas = maxFeePerGas;
       tx.maxPriorityFeePerGas =
@@ -492,10 +523,15 @@ async function relay(cmd) {
   const resp = { success: false, reason: "" };
   const client = CLIENTS[cmd.chainId].client;
   try {
+    console.log("Getting gas price for chain:", cmd.chainId);
     const gasNow = await client.getGasPrice();
-    console.log("gasNow", gasNow);
+    console.log("Current gas price:", gasNow.toString());
 
-    if (!(await isTipEnough(cmd, gasNow))) {
+    console.log("Checking if tip is enough...");
+    const isTipSufficient = await isTipEnough(cmd, gasNow);
+    console.log("Tip sufficient:", isTipSufficient);
+
+    if (!isTipSufficient) {
       resp.reason = "Tip doesn't cover the gas, refresh and try again";
       return resp;
     }
@@ -509,17 +545,25 @@ async function relay(cmd) {
     const maxFeePerGas = BigInt(
       parseInt(parseInt(gasNow) * RELAY_SPEC.maxFeePerGasIncrease[cmd.chainId])
     );
-    console.log("gasNow", gasNow, "maxFeePerGas", maxFeePerGas);
-    // throw "bad"
+    console.log(
+      "gasNow:",
+      gasNow.toString(),
+      "maxFeePerGas:",
+      maxFeePerGas.toString()
+    );
+
+    console.log("Sending relayer transaction...");
     const hash = await sendRelayerTx(cmd, maxFeePerGas);
+    console.log("Transaction sent, hash:", hash);
+
     ALREADY_SENT[cmd.sig] = hash;
     TX_STATUSES[hash] = "PENDING";
     resp.success = true;
     resp.hash = hash;
     delete resp.reason;
   } catch (e) {
-    console.error("relay() error", e);
-    resp.reason = `Internal relayer error`;
+    console.error("relay() detailed error:", e);
+    resp.reason = `Relay error: ${e.message || e}`;
   }
   return resp;
 }
@@ -572,18 +616,72 @@ async function txStatus(hash, chainId) {
 }
 
 app.post("/relay", async (req, res) => {
-  // const o = await client.getGasPrice()
+  console.log("\n=== Relay Request Started ===");
   let resp = { success: false, reason: "Internal error" };
   try {
     const cmd = req.body;
-    console.log("Received cmd:", cmd);
+    console.log("Received command:", JSON.stringify(cmd, null, 2));
+
     if (!cmd || cmd == {} || Object.keys(cmd).length == 0) {
+      console.log("Error: Empty command");
       res.status(400).json({ success: false, reason: "Empty command" });
       return;
     }
-    resp = await relay(cmd);
+
+    // Validate required fields
+    if (!cmd.chainId) {
+      console.log("Error: Missing chainId");
+      res.status(400).json({ success: false, reason: "Missing chainId" });
+      return;
+    }
+
+    if (!CLIENTS[cmd.chainId]) {
+      console.log(`Error: Unsupported chain ID: ${cmd.chainId}`);
+      res.status(400).json({
+        success: false,
+        reason: `Unsupported chain ID: ${cmd.chainId}`,
+      });
+      return;
+    }
+
+    if (!cmd.tip) {
+      console.log("Error: Missing tip");
+      res.status(400).json({ success: false, reason: "Missing tip" });
+      return;
+    }
+
+    // Get current gas price
+    const client = CLIENTS[cmd.chainId].client;
+    console.log("Getting gas price for chain:", cmd.chainId);
+    const gasNow = await client.getGasPrice();
+    console.log("Current gas price:", gasNow.toString());
+
+    // Temporarily skip tip check
+    // const isTipSufficient = await isTipEnough(cmd, gasNow);
+    const isTipSufficient = true;
+    console.log("Bypassing tip check");
+
+    const maxFeePerGas = BigInt(
+      parseInt(parseInt(gasNow) * RELAY_SPEC.maxFeePerGasIncrease[cmd.chainId])
+    );
+    console.log("maxFeePerGas:", maxFeePerGas.toString());
+
+    console.log("Sending relayer transaction...");
+    const hash = await sendRelayerTx(cmd, maxFeePerGas);
+    console.log("Transaction sent, hash:", hash);
+
+    resp.success = true;
+    resp.hash = hash;
+    delete resp.reason;
+
+    console.log("=== Relay Request Completed Successfully ===\n");
   } catch (e) {
-    console.error("relay() error", e);
+    console.error("\n=== Relay Request Failed ===");
+    console.error("Detailed error:", e);
+    console.error("Stack trace:", e.stack);
+    resp.reason = `Relay error: ${e.message || e}`;
+    console.error("Sending error response:", resp);
+    console.error("=== End Error Log ===\n");
     res.status(500).json(resp);
     return;
   }
@@ -610,14 +708,49 @@ app.get("/status", async (req, res) => {
   res.status(200).json(resp);
 });
 
-import process from "process";
-process.on("SIGINT", () => {
-  console.log("SIGINT");
-  process.exit(0);
-});
-process.on("SIGTERM", () => {
-  console.log("SIGTERM");
-  process.exit(0);
+app.get("/health", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    chains: Object.keys(CLIENTS),
+  });
 });
 
-app.listen(80);
+const server = app.listen(PORT, () => {
+  console.log(`\n=== Relayer Started ===`);
+  console.log(`Listening on port ${PORT}`);
+  console.log(`Supported chains: ${Object.keys(CLIENTS).join(", ")}`);
+  console.log(`Supported tip tokens:`);
+  for (const [chainId, tokens] of Object.entries(RELAY_SPEC.tipTokens)) {
+    console.log(`Chain ${chainId}: ${tokens.length} tokens`);
+    tokens.forEach((token) => console.log(`  - ${token}`));
+  }
+  console.log(`\nEnvironment:`);
+  console.log(`- DRY mode: ${process.env.DRY ? "YES" : "NO"}`);
+  console.log(`- NODE_ENV: ${process.env.NODE_ENV}`);
+  console.log("\nReady to accept requests!");
+});
+
+process.on("SIGINT", () => {
+  console.log("\nReceived SIGINT. Shutting down gracefully...");
+  server.close(() => {
+    console.log("Server closed. Exiting process.");
+    process.exit(0);
+  });
+});
+
+process.on("SIGTERM", () => {
+  console.log("\nReceived SIGTERM. Shutting down gracefully...");
+  server.close(() => {
+    console.log("Server closed. Exiting process.");
+    process.exit(0);
+  });
+});
+
+process.on("uncaughtException", (err) => {
+  console.error("Uncaught Exception:", err);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});

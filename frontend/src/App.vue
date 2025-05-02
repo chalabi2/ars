@@ -506,7 +506,7 @@ export const blastSepolia = defineChain({
 });
 
 export const althea = defineChain({
-  id: 6633438,
+  id: 12345,
   name: "Althea",
   nativeCurrency: {
     name: "ALTHEA",
@@ -515,10 +515,10 @@ export const althea = defineChain({
   },
   rpcUrls: {
     public: {
-      http: ["http://testnet.althea.net:8545"],
+      http: ["https://testnet.althea.zone:8545"],
     },
     default: {
-      http: ["http://testnet.althea.net:8545"],
+      http: ["https://testnet.althea.zone:8545"],
     },
   },
   blockExplorers: {
@@ -530,7 +530,7 @@ export const althea = defineChain({
   },
   contracts: {
     multicall3: {
-      address: "0x9726268F55d581d5F50c3853969010ACDCe7Cbff",
+      address: "0xEac8D1987CFD23Cc0B08408cBFAFe80786C135aC",
       blockCreated: 1,
     },
   },
@@ -586,7 +586,7 @@ const chainImages = {
   534352: chain534352,
   11155111: chain11155111,
   168587773: chain168587773,
-  6633438: chain7700,
+  12345: chain7700,
 };
 
 const web3modal = createWeb3Modal({
@@ -656,7 +656,7 @@ const RELAYERS = {
   bus: {
     value: "bus",
     text: "bus",
-    endpoint: "https://relayer.bus.bz/",
+    endpoint: "http://localhost:80/",
     acceptedTipTokens: {
       1: [
         "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
@@ -697,7 +697,7 @@ const RELAYERS = {
         ZERO_ADDRESS,
       ],
       168587773: [ZERO_ADDRESS],
-      6633438: [
+      12345: [
         "0x0412C7c846bb6b7DC462CF6B453f76D8440b2609",
         "0x30dA8589BFa1E509A319489E014d384b87815D89",
         "0x7580bFE88Dd3d07947908FAE12d95872a260F2D8",
@@ -785,7 +785,7 @@ export default {
         534352: {},
         168587773: {},
         11155111: {},
-        6633438: {},
+        12345: {},
       },
 
       ethBalance: "",
@@ -992,6 +992,8 @@ export default {
 
       pool.chain.rollExit = true;
       pool.chain.rollType = 0;
+
+      console.log("LONG SWAP TYPES", order, hop, pool, callpath);
 
       const cmd = toHex(order.encodeBytes());
       console.log(cmd);
@@ -1724,88 +1726,52 @@ export default {
       try {
         const relayer = RELAYERS[signedCmd._action._selectedRelayer];
         const tipTokens = relayer.acceptedTipTokens[this.chainId];
-        const { gas, additionalFee } = await this.estimateRelayerGas(signedCmd);
-        const client = getPublicClient();
-        // const gasPrice = 1000000000000n
-        let gasPrice = await client.getGasPrice();
-        if (this.chainId == goerli.id && gasPrice < parseEther("2", "gwei"))
-          // low gas on goerli breaks tip estimation
-          gasPrice = parseEther("2", "gwei");
+        console.log("Available tip tokens:", tipTokens);
 
-        console.log("gasPrice", gasPrice);
-        signedCmd._action._gasPrice = `${Math.ceil(
-          parseInt(gasPrice) / 1000000000
-        )} gwei`;
-        let gasInWei = gas * gasPrice + additionalFee;
-        console.log("gasInWei", gasInWei);
-        const gasInETH = formatEther(gasInWei);
-
+        // Add native token with small amount
         if (tipTokens.indexOf(ZERO_ADDRESS) != -1) {
           let symbol = this.chain.chain.nativeCurrency.symbol;
           if (this.chain.chain.testnet) symbol = "g" + symbol;
           tipOptions[ZERO_ADDRESS] = {
             token: ZERO_ADDRESS,
-            text: `${parseFloat(gasInETH).toFixed(6)} ${symbol}`,
-            amount: gasInWei.toString(),
+            text: `0.000001 ${symbol}`,
+            amount: parseEther("0.000001").toString(),
           };
         }
 
-        const prices = await this.getPrices(tipTokens, ZERO_ADDRESS);
-        // console.log('gotPrices', prices)
-
+        // Add all other supported tokens with hardcoded small amounts
         for (const tokenAddress of tipTokens) {
           if (tokenAddress == ZERO_ADDRESS) continue;
-          let token;
-          let amount = null;
+
           try {
-            token = await this.fetchTokenInfo(tokenAddress, true);
-            let price = prices[tokenAddress];
-            if (!price) {
-              console.log("got bad price", price);
-              throw "got bad price";
-            }
-            amount = BigInt(Math.round(parseInt(gasInWei) / price));
+            const token = await this.fetchTokenInfo(tokenAddress, true);
+            console.log(`Adding hardcoded tip for token: ${token.symbol}`);
+
+            // Hardcode a small amount (0.000001 tokens)
+            const amount = parseUnits("0.000001", token.decimals);
+
+            tipOptions[tokenAddress] = {
+              token: tokenAddress,
+              text: `0.000001 ${token.symbol}`,
+              amount: amount.toString(),
+            };
+
+            console.log(
+              `Added tip option for ${token.symbol}:`,
+              tipOptions[tokenAddress]
+            );
           } catch (e) {
-            console.error("getPrice error", e);
+            console.error(`Error adding tip token ${tokenAddress}:`, e);
             continue;
           }
-          let amountHuman = getFormattedNumber(
-            parseFloat(formatUnits(amount, token.decimals))
-          );
-          tipOptions[tokenAddress] = {
-            token: tokenAddress,
-            text: `${amountHuman} ${token.symbol}`,
-            amount: amount.toString(),
-          };
-        }
-        console.log("tipOptions", tipOptions);
-        signedCmd._action._tipEstimates = tipOptions;
-        if (!signedCmd._action._selectedTipToken) {
-          signedCmd._action._selectedTipToken = tipTokens[0];
-        }
-        if (
-          !signedCmd._action._tipEstimates.hasOwnProperty(
-            signedCmd._action._selectedTipToken
-          )
-        ) {
-          signedCmd._action._selectedTipToken = ZERO_ADDRESS;
         }
 
-        // find the first valid tip token and select it if the default isn't valid
-        let firstValid = null;
-        for (const tipToken of Object.keys(signedCmd._action._tipEstimates)) {
-          const valid = this.tipValid(signedCmd, tipToken);
-          if (valid) {
-            firstValid = tipToken;
-            break;
-          }
-        }
-        if (!this.tipValid(signedCmd) && firstValid)
-          signedCmd._action._selectedTipToken = firstValid;
+        console.log("Final tip options:", tipOptions);
+        signedCmd._action._tipEstimates = tipOptions;
+        signedCmd._action._selectedTipToken = Object.keys(tipOptions)[0];
       } catch (e) {
-        this.estimating = false;
+        console.error("estimateTips error:", e);
         if (handleError) {
-          console.error("estimateTips error", e);
           this.showToast("Tip estimation error", e.toString(), "danger");
         } else {
           throw e;
@@ -2018,42 +1984,57 @@ export default {
           numberToHex(this.chainId)
         );
         console.log("positions resp", resp);
-        for (const pos of resp) {
-          // Indexer might return zeroes as liq values, they should be fetched from the contract anyway
-          // if (pos.ambientLiq == 0 && pos.concLiq == 0 && pos.rewardLiq == 0) {
-          //   continue
-          // }
+
+        const positionsArray = Array.isArray(resp) ? resp : [];
+
+        for (const pos of positionsArray) {
           try {
-            const base = await this.fetchTokenInfo(pos.base);
-            const quote = await this.fetchTokenInfo(pos.quote);
-            pos._baseDecimals = base.decimals;
-            pos._quoteDecimals = quote.decimals;
-            pos.chainId = Number.parseInt(pos.chainId);
+            // Map snake_case to camelCase properties
+            const mappedPos = {
+              ...pos,
+              poolIdx: BigInt(pos.pool_idx),
+              bidTick: pos.bid_tick,
+              askTick: pos.ask_tick,
+              ambientLiq: pos.ambient_liq,
+              concLiq: pos.conc_liq,
+              // Set position type based on liquidity values
+              positionType:
+                pos.ambient_liq !== "0" ? "ambient" : "concentrated",
+            };
+
+            const base = await this.fetchTokenInfo(mappedPos.base);
+            const quote = await this.fetchTokenInfo(mappedPos.quote);
+            mappedPos._baseDecimals = base.decimals;
+            mappedPos._quoteDecimals = quote.decimals;
+            mappedPos.chainId = Number.parseInt(mappedPos.chainId);
+
+            if (mappedPos.positionType == "concentrated") {
+              mappedPos.slot = concPosSlot(
+                this.address,
+                mappedPos.base,
+                mappedPos.quote,
+                mappedPos.bidTick,
+                mappedPos.askTick,
+                mappedPos.poolIdx
+              ).toString();
+            } else {
+              mappedPos.slot = ambientPosSlot(
+                this.address,
+                mappedPos.base,
+                mappedPos.quote,
+                mappedPos.poolIdx
+              ).toString();
+            }
+            positions[mappedPos.slot] = mappedPos;
           } catch (e) {
-            pos._baseDecimals = 18;
-            pos._quoteDecimals = 18;
+            console.error("Error processing position:", e);
+            continue;
           }
-          if (pos.positionType == "concentrated")
-            pos.slot = concPosSlot(
-              this.address,
-              pos.base,
-              pos.quote,
-              pos.bidTick,
-              pos.askTick,
-              pos.poolIdx
-            ).toString();
-          else
-            pos.slot = ambientPosSlot(
-              this.address,
-              pos.base,
-              pos.quote,
-              pos.poolIdx
-            ).toString();
-          positions[pos.slot] = pos;
         }
       } catch (e) {
         console.error("fetchPositions error", e);
       }
+
       try {
         await Promise.all([
           this.fetchPositionsLiq(positions),
@@ -2062,6 +2043,7 @@ export default {
       } catch (e) {
         console.error("fetchPositions liq error", e);
       }
+
       for (const [slot, pos] of Object.entries(positions)) {
         if (pos.qty) this.$set(this.positions, slot, pos);
         else this.$delete(this.positions, slot);

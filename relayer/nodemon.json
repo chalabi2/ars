@@ -1,0 +1,5 @@
+{
+  "watch": ["*.mjs", "*.js", "*.json"],
+  "ignore": ["*.log"],
+  "exec": "node --trace-warnings index.mjs | tee server.log"
+}

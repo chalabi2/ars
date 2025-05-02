@@ -8,4 +8,7 @@ module.exports = {
     "eslint:recommended",
     "@vue/eslint-config-prettier",
   ],
+  globals: {
+    BigInt: "readonly",
+  },
 };

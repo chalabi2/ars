@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "main": "index.mjs",
   "license": "MIT",
+  "scripts": {
+    "start": "DEBUG=express:* NODE_DEBUG=http nodemon",
+    "start:prod": "node index.mjs"
+  },
   "dependencies": {
     "@wagmi/core": "^1.3.8",
     "cors": "^2.8.5",

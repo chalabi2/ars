@@ -227,7 +227,7 @@ export const TOKENS = {
         "https://assets.coingecko.com/coins/images/6319/large/USD_Coin_icon.png",
     },
   },
-  6633438: {
+  12345: {
     "0x0412C7c846bb6b7DC462CF6B453f76D8440b2609": {
       name: "Bitcoin Max",
       address: "0x0412C7c846bb6b7DC462CF6B453f76D8440b2609",
